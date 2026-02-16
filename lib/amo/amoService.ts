@@ -1,7 +1,7 @@
 /**
  * Сервис AmoCRM: поиск контактов по значениям поля, воронки, создание лидов.
  */
-import { getClient } from "./client";
+import { getClient, clearClient } from "./client";
 import { normalizePhone } from "../normalizePhone";
 
 /** Канонический вид для поиска: телефон → нормализованный, иначе — trim */
@@ -11,9 +11,16 @@ function canonicalValue(value: string): string {
   return norm.length >= 10 ? norm : trimmed;
 }
 
-/** Поиск контактов: канонические значения (телефоны нормализуем), для каждого уникального — query; возвращаем множество найденных в каноническом виде */
-export async function searchContactsByValues(values: string[]): Promise<Set<string>> {
+const SEARCH_DELAY_MS = 250;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Поиск контактов: канонические значения, для каждого — query; задержка между запросами (снижение 429). Возвращаем найденные и список ошибок. */
+export async function searchContactsByValues(values: string[]): Promise<{ found: Set<string>; errors: string[] }> {
   const found = new Set<string>();
+  const errors: string[] = [];
   const amo = await getClient();
   const unique = new Set<string>();
   for (const value of values) {
@@ -21,17 +28,25 @@ export async function searchContactsByValues(values: string[]): Promise<Set<stri
     if (!trimmed) continue;
     unique.add(canonicalValue(trimmed));
   }
-  for (const canonical of unique) {
-    if (!canonical) continue;
+  const list = Array.from(unique).filter(Boolean);
+  for (let i = 0; i < list.length; i++) {
+    const canonical = list[i];
+    if (i > 0) await delay(SEARCH_DELAY_MS);
     try {
       const res = await amo.contact.getContacts({ query: canonical, limit: 1 });
       const contacts = res._embedded?.contacts ?? [];
       if (contacts.length > 0) found.add(canonical);
-    } catch {
-      // при ошибке не считаем значение найденным
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      // 204 No Content — контакт не найден, это не ошибка
+      if (msg.includes("204") || msg.includes("No Content")) continue;
+      errors.push(`${canonical}: ${msg}`);
+      if (msg.includes("401") || msg.includes("Unauthorized")) {
+        clearClient();
+      }
     }
   }
-  return found;
+  return { found, errors };
 }
 
 /** Воронки и статусы для выбора в UI */

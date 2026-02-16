@@ -12,6 +12,11 @@ const redirectUri = process.env.AMOCRM_REDIRECT_URI ?? "";
 
 let clientInstance: Amo | null = null;
 
+/** Сбросить кэш клиента (при 401 — следующий getClient загрузит токен из файла заново). */
+export function clearClient(): void {
+  clientInstance = null;
+}
+
 function buildClient(token: StoredToken | null): Amo {
   const domain = `${subdomain || "your-subdomain"}.amocrm.ru`;
   const auth = {
@@ -31,10 +36,11 @@ function buildClient(token: StoredToken | null): Amo {
 
   const amo = new Amo(domain, auth as ConstructorParameters<typeof Amo>[1], {
     on_token: async (newToken) => {
+      const exp = (newToken as { expires_at?: number }).expires_at;
       const stored: StoredToken = {
         access_token: newToken.access_token,
         refresh_token: newToken.refresh_token,
-        expires_at: (newToken as { expires_at?: number }).expires_at ?? Math.floor(Date.now() / 1000) + 86400,
+        expires_at: exp != null ? exp : Date.now() + 86400 * 1000,
       };
       await saveToken(stored);
     },
@@ -45,9 +51,12 @@ function buildClient(token: StoredToken | null): Amo {
 
 export async function getClient(): Promise<Amo> {
   if (clientInstance) return clientInstance;
-  const token = await loadToken();
+  let token = await loadToken();
   if (!token && !subdomain) {
     throw new Error("AMOCRM: не задан subdomain или токен не сохранён");
+  }
+  if (token && token.expires_at < 1e12) {
+    token = { ...token, expires_at: token.expires_at * 1000 };
   }
   clientInstance = buildClient(token);
   return clientInstance;

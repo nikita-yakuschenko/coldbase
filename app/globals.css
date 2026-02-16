@@ -15,6 +15,10 @@
   --success: #34d399;
 }
 
+.text-muted {
+  color: var(--text-muted);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -546,4 +550,44 @@ td {
 .login-card .link-home:hover {
   transform: translateY(-1px);
   box-shadow: var(--glow);
+}
+
+/* Toast — уведомления сверху, непрозрачный фон */
+.toast {
+  position: fixed;
+  top: 1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  max-width: min(90vw, 480px);
+  padding: 0.875rem 1.25rem;
+  border-radius: var(--radius-sm);
+  background: #14141c;
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glow);
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.2s;
+}
+.toast:hover {
+  opacity: 0.95;
+}
+.toast-message {
+  font-size: 0.95rem;
+  line-height: 1.4;
+  color: var(--text);
+}
+.toast--error {
+  border-color: rgba(248, 113, 113, 0.4);
+  box-shadow: 0 0 24px -4px rgba(248, 113, 113, 0.3);
+}
+.toast--warning {
+  border-color: rgba(251, 191, 36, 0.4);
+  box-shadow: 0 0 24px -4px rgba(251, 191, 36, 0.25);
+}
+.toast--success {
+  border-color: rgba(52, 211, 153, 0.4);
+  box-shadow: 0 0 24px -4px rgba(52, 211, 153, 0.25);
+}
+.toast--info {
+  border-color: var(--glass-border);
 }

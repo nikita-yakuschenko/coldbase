@@ -3,13 +3,17 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { LogOut, Settings } from "lucide-react";
 import { normalizePhone } from "@/lib/normalizePhone";
+import { Toast, type ToastVariant } from "@/app/components/Toast";
 
 type Parsed = { columns: string[]; rows: Record<string, unknown>[] };
+
+const STORAGE_KEY = "coldbase_upload";
 
 export default function ColdbasePage() {
   const [parsed, setParsed] = useState<Parsed | null>(null);
   const [identifierColumns, setIdentifierColumns] = useState<string[]>([]);
   const [foundSet, setFoundSet] = useState<Set<string>>(new Set());
+  const [hasSearched, setHasSearched] = useState(false);
   const [searching, setSearching] = useState(false);
   const [pipelines, setPipelines] = useState<{ id: number; name: string; statuses: { id: number; name: string }[] }[]>([]);
   const [leadFields, setLeadFields] = useState<{ id: string; name: string }[]>([]);
@@ -20,7 +24,38 @@ export default function ColdbasePage() {
   const [result, setResult] = useState<{ ok: number; errors: { rowIndex: number; message: string }[] } | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toast, setToast] = useState<{ message: string; variant: ToastVariant } | null>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+
+  const showToast = useCallback((message: string, variant: ToastVariant = "error") => {
+    setToast({ message, variant });
+  }, []);
+
+  // Восстановление загруженного файла из sessionStorage при перезагрузке
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw) as { parsed: Parsed; identifierColumns: string[] };
+      if (data.parsed?.columns?.length && Array.isArray(data.parsed.rows) && Array.isArray(data.identifierColumns)) {
+        setParsed({ columns: data.parsed.columns, rows: data.parsed.rows });
+        setIdentifierColumns(data.identifierColumns.filter((c) => data.parsed.columns.includes(c)));
+      }
+    } catch {
+      // невалидные данные — игнорируем
+    }
+  }, []);
+
+  // Сохраняем в sessionStorage при смене данных или выбора колонок
+  useEffect(() => {
+    if (typeof window === "undefined" || !parsed) return;
+    try {
+      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ parsed, identifierColumns }));
+    } catch {
+      // quota — не перезаписываем
+    }
+  }, [parsed, identifierColumns]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -37,6 +72,7 @@ export default function ColdbasePage() {
     setUploadError("");
     setParsed(null);
     setFoundSet(new Set());
+    setHasSearched(false);
     setResult(null);
     const formData = new FormData();
     formData.set("file", file);
@@ -44,8 +80,15 @@ export default function ColdbasePage() {
       const res = await fetch("/api/upload", { method: "POST", body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ошибка загрузки");
-      setParsed({ columns: data.columns, rows: data.rows });
-      setIdentifierColumns(data.columns?.length ? [data.columns[0]] : []);
+      const nextParsed = { columns: data.columns, rows: data.rows };
+      const nextCols = data.columns?.length ? [data.columns[0]] : [];
+      setParsed(nextParsed);
+      setIdentifierColumns(nextCols);
+      try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ parsed: nextParsed, identifierColumns: nextCols }));
+      } catch {
+        // quota или отключён storage — работаем без сохранения
+      }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : String(err));
     }
@@ -70,10 +113,31 @@ export default function ColdbasePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ошибка поиска");
-      setFoundSet(new Set(data.found ?? []));
+      const foundSetNew = new Set(data.found ?? []);
+      setFoundSet(foundSetNew);
+      setHasSearched(true);
+      const errs = data.errors ?? [];
+      // Считаем исключённые записи (строки), а не количество совпадений по телефонам
+      const canonicalVal = (raw: string) => {
+        const t = raw.trim();
+        const n = normalizePhone(t);
+        return n.length >= 10 ? n : t;
+      };
+      const excludedRecordCount = parsed.rows.filter((r) =>
+        identifierColumns.some((col) => {
+          const raw = String(r[col] ?? "").trim();
+          return raw && foundSetNew.has(canonicalVal(raw));
+        })
+      ).length;
+      if (errs.length > 0) {
+        const first = errs[0];
+        showToast(`Поиск завершён с ошибками (${errs.length} значений не проверено). Пример: ${first}`, "warning");
+      } else {
+        showToast(`Найдено ${excludedRecordCount} исключённых записей`, "success");
+      }
     } catch (err) {
       setFoundSet(new Set());
-      alert(err instanceof Error ? err.message : String(err));
+      showToast(err instanceof Error ? err.message : String(err));
     } finally {
       setSearching(false);
     }
@@ -93,9 +157,9 @@ export default function ColdbasePage() {
       setLeadFields(fData);
       if (pData.length && !pipelineId) setPipelineId(pData[0].id);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      showToast(err instanceof Error ? err.message : String(err));
     }
-  }, [pipelineId]);
+  }, [pipelineId, showToast]);
 
   const canonical = (raw: string) => {
     const t = raw.trim();
@@ -107,8 +171,9 @@ export default function ColdbasePage() {
       const raw = String(r[col] ?? "").trim();
       return raw && foundSet.has(canonical(raw));
     });
-  const toAddRows = parsed?.rows.filter((r) => !rowIsExclusion(r)) ?? [];
-  const exclusionRows = parsed?.rows.filter(rowIsExclusion) ?? [];
+  // Списки заполняем только после выполнения проверки в AmoCRM
+  const toAddRows = hasSearched ? (parsed?.rows.filter((r) => !rowIsExclusion(r)) ?? []) : [];
+  const exclusionRows = hasSearched ? (parsed?.rows.filter(rowIsExclusion) ?? []) : [];
 
   const onSubmit = useCallback(async () => {
     if (!parsed || toAddRows.length === 0 || !pipelineId) return;
@@ -130,11 +195,11 @@ export default function ColdbasePage() {
       if (!res.ok) throw new Error(data.error || "Ошибка создания лидов");
       setResult(data);
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      showToast(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
     }
-  }, [parsed, toAddRows, pipelineId, statusId, mapping, identifierColumns]);
+  }, [parsed, toAddRows, pipelineId, statusId, mapping, identifierColumns, showToast]);
 
   const currentPipeline = pipelineId ? pipelines.find((p) => p.id === pipelineId) : null;
   const currentStatuses = currentPipeline ? currentPipeline.statuses : [];
@@ -212,8 +277,12 @@ export default function ColdbasePage() {
 
           <section className="card">
             <h3>Исключения (уже есть в CRM)</h3>
-            <p>{exclusionRows.length} записей</p>
-            {exclusionRows.length > 0 && exclusionRows.length <= 100 && (
+            {!hasSearched ? (
+              <p className="text-muted">Сначала нажмите «Проверить в AmoCRM»</p>
+            ) : (
+              <p>{exclusionRows.length} записей</p>
+            )}
+            {hasSearched && exclusionRows.length > 0 && exclusionRows.length <= 100 && (
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -239,8 +308,12 @@ export default function ColdbasePage() {
 
           <section className="card">
             <h3>К добавлению (лиды)</h3>
-            <p>{toAddRows.length} записей</p>
-            {toAddRows.length > 0 && toAddRows.length <= 100 && (
+            {!hasSearched ? (
+              <p className="text-muted">Сначала нажмите «Проверить в AmoCRM»</p>
+            ) : (
+              <p>{toAddRows.length} записей</p>
+            )}
+            {hasSearched && toAddRows.length > 0 && toAddRows.length <= 100 && (
               <div className="table-wrap">
                 <table>
                   <thead>
@@ -354,6 +427,15 @@ export default function ColdbasePage() {
       <footer className="auth-footer">
         © module.team, 2026
       </footer>
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          variant={toast.variant}
+          onClose={() => setToast(null)}
+          autoCloseMs={6000}
+        />
+      )}
     </div>
   );
 }

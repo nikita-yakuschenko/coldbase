@@ -27,10 +27,11 @@ export async function GET(req: NextRequest) {
       },
       {
         on_token: async (newToken) => {
+          const exp = (newToken as { expires_at?: number }).expires_at;
           await saveToken({
             access_token: newToken.access_token,
             refresh_token: newToken.refresh_token,
-            expires_at: (newToken as { expires_at?: number }).expires_at ?? Math.floor(Date.now() / 1000) + 86400,
+            expires_at: exp != null ? exp : Date.now() + 86400 * 1000,
           });
         },
       }
