@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope } from "next/font/google";
+import { AuthGuard } from "./components/AuthGuard";
 import "./globals.css";
 
 const manrope = Manrope({ subsets: ["latin", "cyrillic"], variable: "--font-manrope" });
@@ -17,7 +18,7 @@ export default function RootLayout({
   return (
     <html lang="ru" suppressHydrationWarning className={manrope.variable}>
       <body suppressHydrationWarning className={manrope.className}>
-        {children}
+        <AuthGuard>{children}</AuthGuard>
       </body>
     </html>
   );

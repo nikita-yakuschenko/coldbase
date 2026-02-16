@@ -15,8 +15,8 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Страница входа, API логина и статуса — без проверки
-  if (path === "/login" || path === "/api/auth/login" || path === "/api/auth/status") {
+  // Страница входа, API логина, статуса и check — без проверки
+  if (path === "/login" || path === "/api/auth/login" || path === "/api/auth/status" || path === "/api/auth/check") {
     return NextResponse.next();
   }
 
