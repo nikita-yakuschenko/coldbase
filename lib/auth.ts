@@ -1,8 +1,17 @@
 /**
  * Проверка пароля и подпись сессии. Web Crypto API — работает в Edge (middleware) и Node.
+ * Читаем env через ключ в рантайме, чтобы при сборке без COOLDBASE_PASSWORD не «запеклось» отключение авторизации.
  */
 const COOKIE_NAME = "coldbase_session";
-const SECRET = process.env.COOLDBASE_SECRET ?? process.env.AMOCRM_CLIENT_SECRET ?? "coldbase-default-change-me";
+
+/** Чтение env в рантайме (ключ через конкатенацию, чтобы не заинлайнило при сборке). */
+function getEnv(suffix: string): string | undefined {
+  return process.env["COOLDBASE_" + suffix];
+}
+
+function getSecret(): string {
+  return getEnv("SECRET") ?? process.env["AMOCRM_CLIENT_SECRET"] ?? "coldbase-default-change-me";
+}
 
 export function getSessionCookieName(): string {
   return COOKIE_NAME;
@@ -24,7 +33,7 @@ async function hmacHex(secret: string, message: string): Promise<string> {
 
 /** Подпись для значения сессии (логин успешен). */
 export async function signSession(): Promise<string> {
-  return hmacHex(SECRET, "coldbase_logged_in");
+  return hmacHex(getSecret(), "coldbase_logged_in");
 }
 
 /** Сравнение строк за константное время. */
@@ -40,18 +49,18 @@ function constantTimeEqual(a: string, b: string): boolean {
 /** Проверка cookie сессии. */
 export async function verifySession(cookieValue: string | undefined): Promise<boolean> {
   if (!cookieValue) return false;
-  const expected = await hmacHex(SECRET, "coldbase_logged_in");
+  const expected = await hmacHex(getSecret(), "coldbase_logged_in");
   return constantTimeEqual(cookieValue, expected);
 }
 
-/** Включена ли проверка пароля (задан COOLDBASE_PASSWORD). */
+/** Включена ли проверка пароля (задан COOLDBASE_PASSWORD). Читаем в рантайме. */
 export function isAuthRequired(): boolean {
-  return Boolean(process.env.COOLDBASE_PASSWORD);
+  return Boolean(getEnv("PASSWORD"));
 }
 
 /** Проверка пароля из env. */
 export function checkPassword(password: string): boolean {
-  const envPassword = process.env.COOLDBASE_PASSWORD;
+  const envPassword = getEnv("PASSWORD");
   if (!envPassword) return false;
   return password === envPassword;
 }
