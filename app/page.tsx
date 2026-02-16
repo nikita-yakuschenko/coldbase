@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useCallback } from "react";
-import { LogOut } from "lucide-react";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { LogOut, Settings } from "lucide-react";
 import { normalizePhone } from "@/lib/normalizePhone";
 
 type Parsed = { columns: string[]; rows: Record<string, unknown>[] };
@@ -19,6 +19,17 @@ export default function ColdbasePage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ ok: number; errors: { rowIndex: number; message: string }[] } | null>(null);
   const [uploadError, setUploadError] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const close = (e: MouseEvent) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) setSettingsOpen(false);
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [settingsOpen]);
 
   const onUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -132,10 +143,31 @@ export default function ColdbasePage() {
     <div className="app">
       <header className="header">
         <h1>coldbase</h1>
-        <a href="/api/auth/logout" className="logout-btn" title="Выйти из аккаунта">
-          <LogOut />
-          <span>Выйти</span>
-        </a>
+        <div className="header-actions">
+          <div className="settings-wrap" ref={settingsRef}>
+            <button
+              type="button"
+              className="icon-btn settings-btn"
+              onClick={() => setSettingsOpen((v) => !v)}
+              title="Настройки"
+              aria-expanded={settingsOpen}
+            >
+              <Settings />
+            </button>
+            {settingsOpen && (
+              <div className="settings-dropdown">
+                <a href="/api/amo/auth" target="_blank" rel="noopener noreferrer" className="settings-dropdown-link">
+                  Авторизация AmoCRM
+                </a>
+                <p className="settings-dropdown-hint">Redirect URI в интеграции: <code>/api/amo/callback</code></p>
+              </div>
+            )}
+          </div>
+          <a href="/api/auth/logout" className="logout-btn" title="Выйти из аккаунта">
+            <LogOut />
+            <span>Выйти</span>
+          </a>
+        </div>
       </header>
 
       <section className="card">
@@ -320,11 +352,7 @@ export default function ColdbasePage() {
       )}
 
       <footer className="auth-footer">
-        <a href="/api/amo/auth" target="_blank" rel="noopener noreferrer">
-          Авторизация AmoCRM
-        </a>
-        {" — "}
-        после перехода по ссылке авторизуйтесь и вернитесь сюда. Redirect URI в настройках интеграции должен совпадать с <code>/api/amo/callback</code>.
+        © module.team, 2026
       </footer>
     </div>
   );
