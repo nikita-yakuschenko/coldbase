@@ -113,7 +113,8 @@ export default function ColdbasePage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ошибка поиска");
-      const foundSetNew = new Set(data.found ?? []);
+      const foundArr = (data.found ?? []) as string[];
+      const foundSetNew = new Set<string>(foundArr);
       setFoundSet(foundSetNew);
       setHasSearched(true);
       const errs = data.errors ?? [];
