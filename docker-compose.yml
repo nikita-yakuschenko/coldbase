@@ -1,0 +1,11 @@
+services:
+  coldbase:
+    build: .
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      # Токен AmoCRM сохраняется между перезапусками
+      - ./data:/app/data
+    restart: unless-stopped
