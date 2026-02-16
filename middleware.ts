@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getSessionCookieName, verifySession, isAuthRequired } from "@/lib/auth";
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const path = req.nextUrl.pathname;
 
   // Статика и внутренние роуты Next.js
@@ -21,7 +21,8 @@ export function middleware(req: NextRequest) {
   }
 
   const cookie = req.cookies.get(getSessionCookieName())?.value;
-  if (!verifySession(cookie)) {
+  const valid = await verifySession(cookie);
+  if (!valid) {
     // API без авторизации — 401
     if (path.startsWith("/api/")) {
       return NextResponse.json({ error: "Требуется авторизация" }, { status: 401 });

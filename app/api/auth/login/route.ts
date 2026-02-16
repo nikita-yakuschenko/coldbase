@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   if (!checkPassword(password)) {
     return NextResponse.json({ error: "Неверный пароль" }, { status: 401 });
   }
-  const token = signSession();
+  const token = await signSession();
   const res = NextResponse.json({ ok: true });
   res.cookies.set(getSessionCookieName(), token, {
     httpOnly: true,

@@ -1,8 +1,6 @@
 /**
- * Проверка пароля и подпись сессии. Один пароль из env — доступ только для своих.
+ * Проверка пароля и подпись сессии. Web Crypto API — работает в Edge (middleware) и Node.
  */
-import { createHmac, timingSafeEqual } from "crypto";
-
 const COOKIE_NAME = "coldbase_session";
 const SECRET = process.env.COOLDBASE_SECRET ?? process.env.AMOCRM_CLIENT_SECRET ?? "coldbase-default-change-me";
 
@@ -10,21 +8,40 @@ export function getSessionCookieName(): string {
   return COOKIE_NAME;
 }
 
+async function hmacHex(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message));
+  return Array.from(new Uint8Array(sig))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 /** Подпись для значения сессии (логин успешен). */
-export function signSession(): string {
-  return createHmac("sha256", SECRET).update("coldbase_logged_in").digest("hex");
+export async function signSession(): Promise<string> {
+  return hmacHex(SECRET, "coldbase_logged_in");
+}
+
+/** Сравнение строк за константное время. */
+function constantTimeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let out = 0;
+  for (let i = 0; i < a.length; i++) {
+    out |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return out === 0;
 }
 
 /** Проверка cookie сессии. */
-export function verifySession(cookieValue: string | undefined): boolean {
+export async function verifySession(cookieValue: string | undefined): Promise<boolean> {
   if (!cookieValue) return false;
-  const expected = signSession();
-  if (cookieValue.length !== expected.length) return false;
-  try {
-    return timingSafeEqual(Buffer.from(cookieValue, "hex"), Buffer.from(expected, "hex"));
-  } catch {
-    return false;
-  }
+  const expected = await hmacHex(SECRET, "coldbase_logged_in");
+  return constantTimeEqual(cookieValue, expected);
 }
 
 /** Включена ли проверка пароля (задан COOLDBASE_PASSWORD). */
