@@ -45,11 +45,11 @@ function LoginForm() {
 
   if (authRequired === false) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0d0d0f] px-4">
-        <div className="w-full max-w-sm rounded-2xl bg-white/5 border border-white/10 p-8 shadow-xl backdrop-blur text-center">
-          <h1 className="text-xl font-semibold text-white mb-2">coldbase</h1>
-          <p className="text-white/60 mb-6">Вход не настроен. Перейдите на главную.</p>
-          <a href="/" className="inline-block py-3 px-6 rounded-xl bg-gradient-to-r from-cyan-500/90 to-violet-500/90 text-white font-medium hover:opacity-90">
+      <div className="login-page">
+        <div className="login-card" style={{ textAlign: "center" }}>
+          <h1>coldbase</h1>
+          <p className="subtitle">Вход не настроен. Перейдите на главную.</p>
+          <a href="/" className="link-home">
             На главную
           </a>
         </div>
@@ -58,25 +58,27 @@ function LoginForm() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0d0d0f] px-4">
-      <div className="w-full max-w-sm rounded-2xl bg-white/5 border border-white/10 p-8 shadow-xl backdrop-blur">
-        <h1 className="text-xl font-semibold text-white mb-2">coldbase</h1>
-        <p className="text-sm text-white/60 mb-6">{authRequired === null ? "Загрузка…" : "Введите пароль для входа"}</p>
-        <form onSubmit={onSubmit} className="space-y-4">
+    <div className="login-page">
+      <div className="login-card">
+        <h1>coldbase</h1>
+        <p className="subtitle">
+          {authRequired === null ? "Загрузка…" : "Введите пароль для входа"}
+        </p>
+        <form onSubmit={onSubmit}>
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="Пароль"
-            className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
             autoFocus
             required
+            autoComplete="current-password"
           />
-          {error && <p className="text-sm text-red-400">{error}</p>}
+          {error && <p className="error">{error}</p>}
           <button
             type="submit"
             disabled={loading || authRequired === null}
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500/90 to-violet-500/90 text-white font-medium hover:opacity-90 disabled:opacity-50"
+            className="btn-login"
           >
             {loading ? "Вход…" : "Войти"}
           </button>
@@ -88,11 +90,13 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[#0d0d0f]">
-        <p className="text-white/60">Загрузка…</p>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="login-page">
+          <p style={{ color: "var(--text-muted)" }}>Загрузка…</p>
+        </div>
+      }
+    >
       <LoginForm />
     </Suspense>
   );

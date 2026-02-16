@@ -342,3 +342,113 @@ td {
   font-weight: 600;
   text-shadow: 0 0 20px rgba(52, 211, 153, 0.3);
 }
+
+/* Login page */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 400px;
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur));
+  -webkit-backdrop-filter: blur(var(--blur));
+  border-radius: var(--radius);
+  border: 1px solid var(--glass-border);
+  padding: 2rem;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), var(--glow);
+}
+
+.login-card h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin: 0 0 0.25rem 0;
+  background: linear-gradient(135deg, #fff 0%, rgba(255, 255, 255, 0.8) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.login-card .subtitle {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin: 0 0 1.5rem 0;
+}
+
+.login-card input[type="password"] {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  font-size: 1rem;
+  font-family: inherit;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 1rem;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.login-card input[type="password"]::placeholder {
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.login-card input[type="password"]:focus {
+  outline: none;
+  border-color: var(--liquid-from);
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.2);
+}
+
+.login-card .btn-login {
+  width: 100%;
+  padding: 0.9rem 1.25rem;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: transform 0.15s, box-shadow 0.2s, opacity 0.15s;
+  background: linear-gradient(135deg, var(--liquid-from) 0%, var(--liquid-via) 50%, var(--liquid-to) 100%);
+  background-size: 200% 200%;
+  color: #fff;
+  box-shadow: var(--glow);
+}
+
+.login-card .btn-login:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 0 50px -8px rgba(139, 92, 246, 0.5);
+}
+
+.login-card .btn-login:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.login-card .link-home {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.6rem 1.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  border-radius: var(--radius-sm);
+  border: none;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--liquid-from), var(--liquid-via));
+  color: #fff;
+  text-decoration: none;
+  transition: transform 0.15s, box-shadow 0.2s;
+}
+
+.login-card .link-home:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--glow);
+}
