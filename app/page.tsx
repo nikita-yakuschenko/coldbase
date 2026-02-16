@@ -320,8 +320,7 @@ export default function ColdbasePage() {
         </a>
         {" — "}
         после перехода по ссылке авторизуйтесь и вернитесь сюда. Redirect URI в настройках интеграции должен совпадать с <code>/api/amo/callback</code>.
-        {" · "}
-        <a href="/api/auth/logout">Выйти</a>
+        <a href="/api/auth/logout" className="logout-btn" title="Выйти из аккаунта">Выйти</a>
       </footer>
     </div>
   );
