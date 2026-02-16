@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { LogOut } from "lucide-react";
 import { normalizePhone } from "@/lib/normalizePhone";
 
 type Parsed = { columns: string[]; rows: Record<string, unknown>[] };
@@ -131,6 +132,10 @@ export default function ColdbasePage() {
     <div className="app">
       <header className="header">
         <h1>coldbase</h1>
+        <a href="/api/auth/logout" className="logout-btn" title="Выйти из аккаунта">
+          <LogOut />
+          <span>Выйти</span>
+        </a>
       </header>
 
       <section className="card">
@@ -320,7 +325,6 @@ export default function ColdbasePage() {
         </a>
         {" — "}
         после перехода по ссылке авторизуйтесь и вернитесь сюда. Redirect URI в настройках интеграции должен совпадать с <code>/api/amo/callback</code>.
-        <a href="/api/auth/logout" className="logout-btn" title="Выйти из аккаунта">Выйти</a>
       </footer>
     </div>
   );
