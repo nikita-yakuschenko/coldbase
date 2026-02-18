@@ -17,13 +17,12 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Варианты query для телефона: в AmoCRM часто хранят как +7999... или 7999... */
+/** Варианты query для телефона: при 400 пробуем формат +7 (требуется API). */
 function phoneQueryVariants(canonical: string): string[] {
-  const variants = [canonical];
   if (/^7\d{10}$/.test(canonical)) {
-    variants.push("+" + canonical);
+    return ["+" + canonical, canonical];
   }
-  return variants;
+  return [canonical];
 }
 
 /** Поиск контактов: канонические значения, для каждого — query; задержка между запросами (снижение 429). Возвращаем найденные и список ошибок. */
