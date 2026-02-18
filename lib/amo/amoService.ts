@@ -17,6 +17,15 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Варианты query для телефона: в AmoCRM часто хранят как +7999... или 7999... */
+function phoneQueryVariants(canonical: string): string[] {
+  const variants = [canonical];
+  if (/^7\d{10}$/.test(canonical)) {
+    variants.push("+" + canonical);
+  }
+  return variants;
+}
+
 /** Поиск контактов: канонические значения, для каждого — query; задержка между запросами (снижение 429). Возвращаем найденные и список ошибок. */
 export async function searchContactsByValues(values: string[]): Promise<{ found: Set<string>; errors: string[] }> {
   const found = new Set<string>();
@@ -32,19 +41,32 @@ export async function searchContactsByValues(values: string[]): Promise<{ found:
   for (let i = 0; i < list.length; i++) {
     const canonical = list[i];
     if (i > 0) await delay(SEARCH_DELAY_MS);
-    try {
-      const res = await amo.contact.getContacts({ query: canonical, limit: 1 });
-      const contacts = res._embedded?.contacts ?? [];
-      if (contacts.length > 0) found.add(canonical);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // 204 No Content — контакт не найден, это не ошибка
-      if (msg.includes("204") || msg.includes("No Content")) continue;
-      errors.push(`${canonical}: ${msg}`);
-      if (msg.includes("401") || msg.includes("Unauthorized")) {
-        clearClient();
+    const variants = /^\d+$/.test(canonical) && canonical.length >= 10 ? phoneQueryVariants(canonical) : [canonical];
+    let matched = false;
+    for (const query of variants) {
+      try {
+        const res = await amo.contact.getContacts({ query, limit: 1 });
+        const contacts = res._embedded?.contacts ?? [];
+        if (contacts.length > 0) {
+          found.add(canonical);
+          matched = true;
+          break;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("204") || msg.includes("No Content")) continue;
+        errors.push(`${canonical}: ${msg}`);
+        if (msg.includes("401") || msg.includes("Unauthorized")) {
+          clearClient();
+        }
+        break;
       }
+      if (variants.length > 1) await delay(SEARCH_DELAY_MS);
     }
+    if (!matched && variants.length > 1) await delay(SEARCH_DELAY_MS);
+  }
+  if (process.env.NODE_ENV !== "test") {
+    console.info("[coldbase] contacts/search: requested=" + list.length + ", found=" + found.size + ", errors=" + errors.length + (errors[0] ? " first=" + errors[0] : ""));
   }
   return { found, errors };
 }
