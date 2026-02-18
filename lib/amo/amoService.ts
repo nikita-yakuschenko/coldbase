@@ -61,7 +61,8 @@ export async function searchContactsByValues(values: string[]): Promise<{ found:
         if (msg.includes("204") || msg.includes("No Content")) continue;
         errors.push(`${canonical}: ${msg}`);
         if (errors.length === 1) {
-          console.warn("[coldbase] contacts/search first error detail:", e);
+          const res = e && typeof e === "object" && "response" in e ? (e as { response: unknown }).response : null;
+          console.warn("[coldbase] contacts/search first error detail:", res ? JSON.stringify(res, null, 2) : e);
         }
         if (msg.includes("401") || msg.includes("Unauthorized")) {
           clearClient();
