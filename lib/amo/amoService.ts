@@ -53,9 +53,17 @@ export async function searchContactsByValues(values: string[]): Promise<{ found:
           break;
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        let msg = e instanceof Error ? e.message : String(e);
+        if (e && typeof e === "object" && "response" in e) {
+          const r = (e as { response?: unknown }).response;
+          msg = msg || (typeof r === "object" && r !== null && "status" in r ? String((r as { status: number }).status) : JSON.stringify(r));
+        }
+        if (!msg) msg = String(e);
         if (msg.includes("204") || msg.includes("No Content")) continue;
         errors.push(`${canonical}: ${msg}`);
+        if (errors.length === 1) {
+          console.warn("[coldbase] contacts/search first error detail:", e);
+        }
         if (msg.includes("401") || msg.includes("Unauthorized")) {
           clearClient();
         }
