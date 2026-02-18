@@ -103,6 +103,8 @@ export async function getContactPhoneFieldId(): Promise<number | null> {
   return cachedContactPhoneFieldId;
 }
 
+const NOTE_COLUMN_PATTERN = /^Примечание к сделке( \(\d+\))?$/;
+
 export interface CreateLeadRow {
   /** Строка из Excel (ключ — колонка, значение — из ячейки) */
   row: Record<string, unknown>;
@@ -112,7 +114,16 @@ export interface CreateLeadRow {
   status_id?: number;
   /** Значение идентификатора для создания/привязки контакта (например телефон) */
   identifierValue?: string;
+  /** Тексты примечаний к сделке (по одному на колонку «Примечание к сделке» по порядку) */
+  noteTexts?: string[];
 }
+
+/** Колонки «Примечание к сделке» в порядке появления (для использования в route). */
+export function getNoteColumns(columns: string[]): string[] {
+  return columns.filter((c) => c === "Примечание к сделке" || NOTE_COLUMN_PATTERN.test(c));
+}
+
+const NOTES_BATCH = 250;
 
 /** Создание лидов: с контактом — addComplex (до 50 за запрос), без — addLeads (до 250). */
 export async function createLeads(rows: CreateLeadRow[]): Promise<{ ok: number; errors: { rowIndex: number; message: string }[] }> {
@@ -161,19 +172,42 @@ export async function createLeads(rows: CreateLeadRow[]): Promise<{ ok: number; 
     });
 
     try {
+      let leadIds: number[] = [];
       if (hasContacts) {
         const response = await amo.lead.addComplex(leads as Parameters<typeof amo.lead.addComplex>[0]);
-        const created = Array.isArray(response) ? response.length : 0;
+        leadIds = Array.isArray(response) ? response.map((r: { id: number }) => r.id) : [];
+        const created = leadIds.length;
         ok += created;
         if (created < chunk.length) {
           for (let k = created; k < chunk.length; k++) errors.push({ rowIndex: i + k, message: "Не создан" });
         }
       } else {
         const response = await amo.lead.addLeads(leads as Parameters<typeof amo.lead.addLeads>[0]);
-        const created = response._embedded?.leads?.length ?? 0;
+        const embedded = response._embedded?.leads ?? [];
+        leadIds = embedded.map((l: { id: number }) => l.id);
+        const created = leadIds.length;
         ok += created;
         if (created < chunk.length) {
           for (let k = created; k < chunk.length; k++) errors.push({ rowIndex: i + k, message: "Не создан" });
+        }
+      }
+      // Примечания к сделкам: по одному на каждую непустую запись в noteTexts по порядку
+      const notesPayload: { entity_id: number; note_type: "common"; params: { text: string } }[] = [];
+      for (let k = 0; k < leadIds.length; k++) {
+        const texts = chunk[k].noteTexts ?? [];
+        for (const text of texts) {
+          const t = String(text).trim();
+          if (t) notesPayload.push({ entity_id: leadIds[k], note_type: "common", params: { text: t } });
+        }
+      }
+      for (let n = 0; n < notesPayload.length; n += NOTES_BATCH) {
+        const batch = notesPayload.slice(n, n + NOTES_BATCH);
+        if (batch.length > 0) {
+          try {
+            await amo.note.addNotes("leads", batch);
+          } catch {
+            // лиды уже созданы, примечания частично не добавлены — не ломаем общий результат
+          }
         }
       }
     } catch (e) {

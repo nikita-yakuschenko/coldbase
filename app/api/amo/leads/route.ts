@@ -2,12 +2,13 @@
  * POST: создание лидов — строки «к добавлению» + маппинг + pipeline_id, status_id, колонка-идентификатор.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createLeads, CreateLeadRow } from "@/lib/amo/amoService";
+import { createLeads, CreateLeadRow, getNoteColumns } from "@/lib/amo/amoService";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const rows = body.rows as Record<string, unknown>[];
+    const columns = (body.columns as string[]) ?? [];
     const mapping = body.mapping as Record<string, string>;
     const pipeline_id = Number(body.pipeline_id);
     const status_id = body.status_id != null ? Number(body.status_id) : undefined;
@@ -20,6 +21,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const noteColumns = getNoteColumns(Array.isArray(columns) ? columns : []);
+
     const payload: CreateLeadRow[] = rows.map((row) => {
       let identifierValue: string | undefined;
       if (Array.isArray(identifierColumns) && identifierColumns.length > 0) {
@@ -31,12 +34,16 @@ export async function POST(req: NextRequest) {
           }
         }
       }
+      const noteTexts = noteColumns
+        .map((col) => String(row[col] ?? "").trim())
+        .filter((t) => t.length > 0);
       return {
         row,
         mapping,
         pipeline_id,
         status_id,
         identifierValue,
+        noteTexts: noteTexts.length > 0 ? noteTexts : undefined,
       };
     });
 

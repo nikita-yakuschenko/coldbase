@@ -1,13 +1,36 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { LogOut, Settings } from "lucide-react";
+import { LogOut, Settings, ChevronDown, ChevronUp } from "lucide-react";
 import { normalizePhone } from "@/lib/normalizePhone";
 import { Toast, type ToastVariant } from "@/app/components/Toast";
 
 type Parsed = { columns: string[]; rows: Record<string, unknown>[] };
 
 const STORAGE_KEY = "coldbase_upload";
+
+/** Колонки для проверки в CRM — только телефоны и email (остальные скрываем из выбора). */
+function isColumnForCheck(colName: string): boolean {
+  return /телефон|phone|email|e-mail|мейл|mail/i.test(colName);
+}
+
+/** Колонка «Рабочий телефон» (включая дубли типа «Рабочий телефон (2)»). */
+function isWorkPhoneColumn(colName: string): boolean {
+  return /рабочий\s*телефон|work\s*phone/i.test(colName);
+}
+
+/** По умолчанию выбираем все колонки с рабочим телефоном; если таких нет — первую подходящую для проверки. */
+function getDefaultIdentifierColumns(columns: string[]): string[] {
+  const checkCols = columns.filter(isColumnForCheck);
+  const workPhoneCols = checkCols.filter(isWorkPhoneColumn);
+  if (workPhoneCols.length > 0) return workPhoneCols;
+  return checkCols.length > 0 ? [checkCols[0]] : [];
+}
+
+/** Колонка «Примечание к сделке» — в таблицах не выводим, чтобы не ломать структуру. */
+function isNoteColumn(colName: string): boolean {
+  return colName === "Примечание к сделке" || /^Примечание к сделке \(\d+\)$/.test(colName);
+}
 
 export default function ColdbasePage() {
   const [parsed, setParsed] = useState<Parsed | null>(null);
@@ -25,7 +48,17 @@ export default function ColdbasePage() {
   const [uploadError, setUploadError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; variant: ToastVariant } | null>(null);
+  const [showExclusionsTable, setShowExclusionsTable] = useState(false);
+  const [showToAddTable, setShowToAddTable] = useState(false);
+  const [exclusionPage, setExclusionPage] = useState(0);
+  const [toAddPage, setToAddPage] = useState(0);
+  const [showRestOfMapping, setShowRestOfMapping] = useState(false);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const ROWS_PER_PAGE = 10;
+  const nameField = leadFields.find((f) => f.id === "name");
+  const restLeadFields = leadFields.filter((f) => f.id !== "name");
 
   const showToast = useCallback((message: string, variant: ToastVariant = "error") => {
     setToast({ message, variant });
@@ -40,7 +73,10 @@ export default function ColdbasePage() {
       const data = JSON.parse(raw) as { parsed: Parsed; identifierColumns: string[] };
       if (data.parsed?.columns?.length && Array.isArray(data.parsed.rows) && Array.isArray(data.identifierColumns)) {
         setParsed({ columns: data.parsed.columns, rows: data.parsed.rows });
-        setIdentifierColumns(data.identifierColumns.filter((c) => data.parsed.columns.includes(c)));
+        const valid = data.identifierColumns.filter(
+          (c) => data.parsed.columns.includes(c) && isColumnForCheck(c)
+        );
+        setIdentifierColumns(valid);
       }
     } catch {
       // невалидные данные — игнорируем
@@ -66,6 +102,28 @@ export default function ColdbasePage() {
     return () => document.removeEventListener("click", close);
   }, [settingsOpen]);
 
+  const onReset = useCallback(() => {
+    try {
+      sessionStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+    setParsed(null);
+    setIdentifierColumns([]);
+    setFoundSet(new Set());
+    setHasSearched(false);
+    setResult(null);
+    setUploadError("");
+    setPipelines([]);
+    setLeadFields([]);
+    setPipelineId("");
+    setStatusId("");
+    setMapping({});
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
   const onUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -81,7 +139,7 @@ export default function ColdbasePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ошибка загрузки");
       const nextParsed = { columns: data.columns, rows: data.rows };
-      const nextCols = data.columns?.length ? [data.columns[0]] : [];
+      const nextCols = getDefaultIdentifierColumns(data.columns ?? []);
       setParsed(nextParsed);
       setIdentifierColumns(nextCols);
       try {
@@ -117,6 +175,10 @@ export default function ColdbasePage() {
       const foundSetNew = new Set<string>(foundArr);
       setFoundSet(foundSetNew);
       setHasSearched(true);
+      setShowExclusionsTable(false);
+      setShowToAddTable(false);
+      setExclusionPage(0);
+      setToAddPage(0);
       const errs = data.errors ?? [];
       // Считаем исключённые записи (строки), а не количество совпадений по телефонам
       const canonicalVal = (raw: string) => {
@@ -156,7 +218,14 @@ export default function ColdbasePage() {
       if (!fRes.ok) throw new Error(fData.error);
       setPipelines(pData);
       setLeadFields(fData);
-      if (pData.length && !pipelineId) setPipelineId(pData[0].id);
+      if (pData.length && !pipelineId) {
+        const coldPipeline = pData.find((p: { name: string }) => /холодный\s*прозвон/i.test(p.name));
+        const defaultPipeline = coldPipeline ?? pData[0];
+        setPipelineId(defaultPipeline.id);
+        const statuses = defaultPipeline.statuses ?? [];
+        const coldStatus = statuses.find((s: { name: string }) => /база\s*на\s*холодн/i.test(s.name));
+        if (coldStatus) setStatusId(coldStatus.id);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err));
     }
@@ -186,6 +255,7 @@ export default function ColdbasePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           rows: toAddRows,
+          columns: parsed.columns,
           mapping,
           pipeline_id: Number(pipelineId),
           status_id: statusId || undefined,
@@ -239,7 +309,22 @@ export default function ColdbasePage() {
       <section className="card">
         <h2>1. Загрузите Excel с холодной базой</h2>
         <div className="file-wrap">
-          <input type="file" accept=".xlsx,.xls" onChange={onUpload} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={onUpload}
+          />
+          {parsed && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={onReset}
+              style={{ marginLeft: "0.75rem" }}
+            >
+              Сбросить файл
+            </button>
+          )}
         </div>
         {uploadError && <p className="error">{uploadError}</p>}
         {parsed && (
@@ -251,9 +336,9 @@ export default function ColdbasePage() {
         <>
           <section className="card">
             <h2>2. Колонки для проверки в CRM</h2>
-            <p>Можно несколько: рабочий, моб. телефон и т.д.</p>
+            <p>Показаны только колонки с телефонами и email — по ним проверяем дубли.</p>
             <div className="columns-grid">
-              {parsed.columns.map((c, i) => (
+              {parsed.columns.filter(isColumnForCheck).map((c, i) => (
                 <label key={`col-${i}-${c}`}>
                   <input
                     type="checkbox"
@@ -267,6 +352,9 @@ export default function ColdbasePage() {
                 </label>
               ))}
             </div>
+            {parsed.columns.filter(isColumnForCheck).length === 0 && (
+              <p className="text-muted">Нет колонок с телефоном или email — добавьте в файл колонки с «телефон» или «email» в названии.</p>
+            )}
             <button
               className="btn btn-primary"
               onClick={onSearch}
@@ -277,65 +365,158 @@ export default function ColdbasePage() {
           </section>
 
           <section className="card">
-            <h3>Исключения (уже есть в CRM)</h3>
-            {!hasSearched ? (
-              <p className="text-muted">Сначала нажмите «Проверить в AmoCRM»</p>
-            ) : (
-              <p>{exclusionRows.length} записей</p>
-            )}
-            {hasSearched && exclusionRows.length > 0 && exclusionRows.length <= 100 && (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      {parsed.columns.slice(0, 5).map((c) => (
-                        <th key={c}>{c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {exclusionRows.slice(0, 50).map((row, i) => (
-                      <tr key={i}>
-                        {parsed.columns.slice(0, 5).map((c) => (
-                          <td key={c}>{String(row[c] ?? "")}</td>
+            <h3 className="card-section-title">Исключения (уже есть в CRM)<sup className="card-note-ref">*</sup></h3>
+            <p className="card-note" aria-hidden="true">* Розовым подсвечено поле совпадения.</p>
+            <div className="card-section-row">
+              {hasSearched && exclusionRows.length > 0 && (
+                <>
+                  <span className="exclusions-count">{exclusionRows.length} записей</span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setShowExclusionsTable((v) => !v)}
+                    style={{ marginLeft: "auto" }}
+                  >
+                    {showExclusionsTable ? (
+                      <>Свернуть <ChevronUp style={{ width: 16, height: 16, verticalAlign: "middle" }} /></>
+                    ) : (
+                      <>Развернуть таблицу <ChevronDown style={{ width: 16, height: 16, verticalAlign: "middle" }} /></>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+            {!hasSearched && <p className="text-muted" style={{ marginTop: "0.5rem" }}>Сначала нажмите «Проверить в AmoCRM»</p>}
+            {hasSearched && exclusionRows.length === 0 && <p className="text-muted" style={{ marginTop: "0.5rem" }}>Исключений нет</p>}
+            {hasSearched && exclusionRows.length > 0 && showExclusionsTable && (() => {
+              const totalPages = Math.max(1, Math.ceil(exclusionRows.length / ROWS_PER_PAGE));
+              const page = Math.min(exclusionPage, totalPages - 1);
+              const slice = exclusionRows.slice(page * ROWS_PER_PAGE, page * ROWS_PER_PAGE + ROWS_PER_PAGE);
+              const tableCols = parsed.columns.filter((c) => !isNoteColumn(c));
+              return (
+                <>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          {tableCols.map((c) => (
+                            <th key={c}>{c}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {slice.map((row, i) => (
+                          <tr key={page * ROWS_PER_PAGE + i}>
+                            {tableCols.map((c) => {
+                              const val = String(row[c] ?? "").trim();
+                              const isMatch = identifierColumns.includes(c) && val !== "" && foundSet.has(canonical(val));
+                              return (
+                                <td key={c} className={isMatch ? "match-cell" : undefined}>
+                                  {val || ""}
+                                </td>
+                              );
+                            })}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="pagination-wrap">
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={page <= 0}
+                      onClick={() => setExclusionPage((p) => Math.max(0, p - 1))}
+                    >
+                      Назад
+                    </button>
+                    <span className="text-muted">Страница {page + 1} из {totalPages}</span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={page >= totalPages - 1}
+                      onClick={() => setExclusionPage((p) => Math.min(totalPages - 1, p + 1))}
+                    >
+                      Вперёд
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </section>
 
           <section className="card">
-            <h3>К добавлению (лиды)</h3>
-            {!hasSearched ? (
-              <p className="text-muted">Сначала нажмите «Проверить в AmoCRM»</p>
-            ) : (
-              <p>{toAddRows.length} записей</p>
-            )}
-            {hasSearched && toAddRows.length > 0 && toAddRows.length <= 100 && (
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      {parsed.columns.slice(0, 5).map((c) => (
-                        <th key={c}>{c}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {toAddRows.slice(0, 50).map((row, i) => (
-                      <tr key={i}>
-                        {parsed.columns.slice(0, 5).map((c) => (
-                          <td key={c}>{String(row[c] ?? "")}</td>
+            <h3 className="card-section-title">К добавлению (лиды)</h3>
+            <div className="card-section-row">
+              {hasSearched && toAddRows.length > 0 && (
+                <>
+                  <span className="toadd-count">{toAddRows.length} записей</span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost"
+                    onClick={() => setShowToAddTable((v) => !v)}
+                    style={{ marginLeft: "auto" }}
+                  >
+                    {showToAddTable ? (
+                      <>Свернуть <ChevronUp style={{ width: 16, height: 16, verticalAlign: "middle" }} /></>
+                    ) : (
+                      <>Развернуть таблицу <ChevronDown style={{ width: 16, height: 16, verticalAlign: "middle" }} /></>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+            {!hasSearched && <p className="text-muted" style={{ marginTop: "0.5rem" }}>Сначала нажмите «Проверить в AmoCRM»</p>}
+            {hasSearched && toAddRows.length === 0 && <p className="text-muted" style={{ marginTop: "0.5rem" }}>Записей к добавлению нет</p>}
+            {hasSearched && toAddRows.length > 0 && showToAddTable && (() => {
+              const totalPages = Math.max(1, Math.ceil(toAddRows.length / ROWS_PER_PAGE));
+              const page = Math.min(toAddPage, totalPages - 1);
+              const slice = toAddRows.slice(page * ROWS_PER_PAGE, page * ROWS_PER_PAGE + ROWS_PER_PAGE);
+              const tableCols = parsed.columns.filter((c) => !isNoteColumn(c));
+              return (
+                <>
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          {tableCols.map((c) => (
+                            <th key={c}>{c}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {slice.map((row, i) => (
+                          <tr key={page * ROWS_PER_PAGE + i}>
+                            {tableCols.map((c) => (
+                              <td key={c}>{String(row[c] ?? "")}</td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="pagination-wrap">
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={page <= 0}
+                      onClick={() => setToAddPage((p) => Math.max(0, p - 1))}
+                    >
+                      Назад
+                    </button>
+                    <span className="text-muted">Страница {page + 1} из {totalPages}</span>
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      disabled={page >= totalPages - 1}
+                      onClick={() => setToAddPage((p) => Math.min(totalPages - 1, p + 1))}
+                    >
+                      Вперёд
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </section>
 
           <section className="card">
@@ -344,21 +525,23 @@ export default function ColdbasePage() {
               Загрузить воронки и поля лида
             </button>
             {pipelines.length > 0 && (
-              <>
-                <label>Воронка</label>
-                <select
-                  value={pipelineId}
-                  onChange={(e) => {
-                    setPipelineId(Number(e.target.value));
-                    setStatusId("");
-                  }}
-                >
-                  {pipelines.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
+              <div className="mapping-top-row">
+                <div className="mapping-top-item">
+                  <label>Воронка</label>
+                  <select
+                    value={pipelineId}
+                    onChange={(e) => {
+                      setPipelineId(Number(e.target.value));
+                      setStatusId("");
+                    }}
+                  >
+                    {pipelines.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
                 {currentStatuses.length > 0 && (
-                  <>
+                  <div className="mapping-top-item">
                     <label>Статус (этап)</label>
                     <select
                       value={statusId}
@@ -369,22 +552,17 @@ export default function ColdbasePage() {
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
-                  </>
+                  </div>
                 )}
-              </>
-            )}
-            {leadFields.length > 0 && (
-              <div style={{ marginTop: "1rem" }}>
-                <label>Маппинг: поле лида ← колонка Excel</label>
-                {leadFields.map((f) => (
-                  <div key={f.id} className="mapping-row">
-                    <span>{f.name}</span>
+                {nameField && (
+                  <div className="mapping-top-item">
+                    <label>{nameField.name} ← колонка Excel</label>
                     <select
-                      value={mapping[f.id] ?? ""}
+                      value={mapping[nameField.id] ?? ""}
                       onChange={(e) =>
                         setMapping((prev) => ({
                           ...prev,
-                          [f.id]: e.target.value,
+                          [nameField.id]: e.target.value,
                         }))
                       }
                     >
@@ -394,20 +572,88 @@ export default function ColdbasePage() {
                       ))}
                     </select>
                   </div>
-                ))}
+                )}
+              </div>
+            )}
+            {restLeadFields.length > 0 && (
+              <div className="mapping-rest-wrap" style={{ marginTop: "1rem" }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost mapping-rest-toggle"
+                  onClick={() => setShowRestOfMapping((v) => !v)}
+                >
+                  {showRestOfMapping ? (
+                    <>Свернуть остальные поля <ChevronUp style={{ width: 16, height: 16, verticalAlign: "middle" }} /></>
+                  ) : (
+                    <>Развернуть остальные поля ({restLeadFields.length}) <ChevronDown style={{ width: 16, height: 16, verticalAlign: "middle" }} /></>
+                  )}
+                </button>
+                {showRestOfMapping && (
+                  <div className="mapping-grid">
+                    {restLeadFields.map((f) => (
+                      <div key={f.id} className="mapping-row">
+                        <span>{f.name}</span>
+                        <select
+                          value={mapping[f.id] ?? ""}
+                          onChange={(e) =>
+                            setMapping((prev) => ({
+                              ...prev,
+                              [f.id]: e.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">—</option>
+                          {parsed.columns.map((c) => (
+                            <option key={c} value={c}>{c}</option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </section>
 
           {toAddRows.length > 0 && (
             <section className="card">
-              <button
-                className="btn btn-primary"
-                onClick={onSubmit}
-                disabled={submitting || !pipelineId}
-              >
-                {submitting ? "Отправка…" : "Загрузить в CRM"}
-              </button>
+              <div className="card-section-row" style={{ flexWrap: "wrap", gap: "0.75rem" }}>
+                <button
+                  className="btn btn-primary"
+                  onClick={onSubmit}
+                  disabled={submitting || !pipelineId}
+                >
+                  {submitting ? "Отправка…" : "Загрузить в CRM"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={async () => {
+                    if (!parsed || toAddRows.length === 0) return;
+                    try {
+                      const res = await fetch("/api/export-cleaned", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ columns: parsed.columns, rows: toAddRows }),
+                      });
+                      if (!res.ok) throw new Error("Ошибка выгрузки");
+                      const blob = await res.blob();
+                      const url = URL.createObjectURL(blob);
+                      const d = new Date();
+                      const dateStr = d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" }).replace(/\//g, ".");
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `Очищенная холодная база ${dateStr}.xlsx`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (err) {
+                      showToast(err instanceof Error ? err.message : String(err));
+                    }
+                  }}
+                >
+                  Сохранить очищенный файл
+                </button>
+              </div>
               {result && (
                 <div>
                   <p className="success">

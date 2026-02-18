@@ -61,7 +61,7 @@ body::after {
 }
 
 .app {
-  max-width: 920px;
+  max-width: 1800px;
   margin: 0 auto;
   padding: 2.5rem 1.5rem;
   position: relative;
@@ -224,6 +224,42 @@ body::after {
   color: var(--text-muted);
 }
 
+.card-section-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+  color: var(--text);
+}
+
+.card-note-ref {
+  font-size: 0.65em;
+  font-weight: 400;
+  opacity: 0.8;
+  margin-left: 0.15rem;
+}
+
+.card-note {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0.2rem 0 0.5rem 0;
+  font-weight: 400;
+}
+
+.card-section-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.5rem;
+}
+
+.exclusions-count,
+.toadd-count {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--liquid-from);
+}
+
 .card label {
   display: block;
   font-size: 0.875rem;
@@ -337,14 +373,20 @@ body::after {
 /* Selects — тёмный фон, чтобы выпадающий список не выглядел пустым */
 select {
   font-size: 0.875rem;
-  padding: 0.55rem 0.85rem;
+  padding: 0.55rem 2rem 0.55rem 0.85rem;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  background: #1a1b26;
+  background-color: #1a1b26;
   color: rgba(255, 255, 255, 0.95);
   min-width: 160px;
   font-family: inherit;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='rgba(255,255,255,0.7)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 0.875rem;
 }
 
 select:focus {
@@ -366,21 +408,99 @@ select option:hover {
   color: #fff;
 }
 
+/* Верхняя строка: Воронка, Статус, Название */
+.mapping-top-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem 2.5rem;
+  align-items: flex-end;
+  margin-top: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.mapping-top-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 14rem;
+}
+
+.mapping-top-item label {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.mapping-top-item select {
+  min-width: 14rem;
+  padding: 0.65rem 2rem 0.65rem 1rem;
+  background-position: right 0.65rem center;
+}
+
+/* Блок «остальные поля» */
+.mapping-rest-wrap {
+  padding-top: 1rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--glass-border);
+}
+
+.mapping-rest-toggle {
+  padding: 0.75rem 1rem;
+  font-size: 0.9rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem 2rem;
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+}
+
+@media (max-width: 900px) {
+  .mapping-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .mapping-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .mapping-row {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  margin-bottom: 0.625rem;
+  gap: 1rem;
+  min-width: 0;
+  padding: 0.25rem 0;
 }
 
 .mapping-row span {
   font-size: 0.875rem;
   color: var(--text);
-  min-width: 120px;
+  min-width: 12rem;
+  flex-shrink: 0;
 }
 
 .mapping-row select {
-  min-width: 180px;
+  flex: 1;
+  min-width: 0;
+  max-width: 16rem;
+  padding: 0.55rem 2rem 0.55rem 0.9rem;
+  background-position: right 0.6rem center;
+}
+
+/* Pagination under tables */
+.pagination-wrap {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.75rem;
+  flex-wrap: wrap;
 }
 
 /* Tables — glass */
@@ -417,6 +537,12 @@ th {
 
 td {
   color: var(--text);
+}
+
+/* Подсветка ячейки, по которой произошло совпадение в CRM (исключение) */
+td.match-cell {
+  background: rgba(236, 72, 153, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(236, 72, 153, 0.35);
 }
 
 /* Footer */
