@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { LogOut, Settings, ChevronDown, ChevronUp } from "lucide-react";
 import { normalizePhone } from "@/lib/normalizePhone";
 import { Toast, type ToastVariant } from "@/app/components/Toast";
 
-type Parsed = { columns: string[]; rows: Record<string, unknown>[] };
-
 const STORAGE_KEY = "coldbase_upload";
+/** При большем числе строк в sessionStorage сохраняем только мета (колонки, выбор), не строки — чтобы не блокировать UI и не упираться в лимит. */
+const ROW_STORAGE_LIMIT = 500;
 
 /** Колонки для проверки в CRM — только телефоны и email (остальные скрываем из выбора). */
 function isColumnForCheck(colName: string): boolean {
@@ -33,11 +33,14 @@ function isNoteColumn(colName: string): boolean {
 }
 
 export default function ColdbasePage() {
-  const [parsed, setParsed] = useState<Parsed | null>(null);
+  const [columns, setColumns] = useState<string[]>([]);
+  const [rowCount, setRowCount] = useState(0);
+  const rowsRef = useRef<Record<string, unknown>[]>([]);
   const [identifierColumns, setIdentifierColumns] = useState<string[]>([]);
   const [foundSet, setFoundSet] = useState<Set<string>>(new Set());
   const [hasSearched, setHasSearched] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [restoredTooLarge, setRestoredTooLarge] = useState(false);
   const [pipelines, setPipelines] = useState<{ id: number; name: string; statuses: { id: number; name: string }[] }[]>([]);
   const [leadFields, setLeadFields] = useState<{ id: string; name: string }[]>([]);
   const [pipelineId, setPipelineId] = useState<number | "">("");
@@ -70,28 +73,53 @@ export default function ColdbasePage() {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (!raw) return;
-      const data = JSON.parse(raw) as { parsed: Parsed; identifierColumns: string[] };
-      if (data.parsed?.columns?.length && Array.isArray(data.parsed.rows) && Array.isArray(data.identifierColumns)) {
-        setParsed({ columns: data.parsed.columns, rows: data.parsed.rows });
-        const valid = data.identifierColumns.filter(
-          (c) => data.parsed.columns.includes(c) && isColumnForCheck(c)
-        );
-        setIdentifierColumns(valid);
+      const data = JSON.parse(raw) as {
+        columns?: string[];
+        rows?: Record<string, unknown>[];
+        identifierColumns?: string[];
+        tooLarge?: boolean;
+      };
+      if (!data.columns?.length || !Array.isArray(data.identifierColumns)) return;
+      const validCols = data.identifierColumns.filter(
+        (c) => data.columns!.includes(c) && isColumnForCheck(c)
+      );
+      setColumns(data.columns);
+      setIdentifierColumns(validCols);
+      if (data.tooLarge) {
+        setRowCount(0);
+        rowsRef.current = [];
+        setRestoredTooLarge(true);
+      } else if (Array.isArray(data.rows)) {
+        setRowCount(data.rows.length);
+        rowsRef.current = data.rows;
+      } else {
+        setRowCount(0);
+        rowsRef.current = [];
       }
     } catch {
       // невалидные данные — игнорируем
     }
   }, []);
 
-  // Сохраняем в sessionStorage при смене данных или выбора колонок
+  // Сохраняем в sessionStorage при смене данных или выбора колонок (без тысяч строк при больших базах)
   useEffect(() => {
-    if (typeof window === "undefined" || !parsed) return;
+    if (typeof window === "undefined" || columns.length === 0) return;
     try {
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ parsed, identifierColumns }));
+      if (rowCount > ROW_STORAGE_LIMIT) {
+        sessionStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ columns, identifierColumns, tooLarge: true })
+        );
+      } else {
+        sessionStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({ columns, identifierColumns, rows: rowsRef.current })
+        );
+      }
     } catch {
       // quota — не перезаписываем
     }
-  }, [parsed, identifierColumns]);
+  }, [columns, rowCount, identifierColumns]);
 
   useEffect(() => {
     if (!settingsOpen) return;
@@ -108,12 +136,15 @@ export default function ColdbasePage() {
     } catch {
       // ignore
     }
-    setParsed(null);
+    setColumns([]);
+    setRowCount(0);
+    rowsRef.current = [];
     setIdentifierColumns([]);
     setFoundSet(new Set());
     setHasSearched(false);
     setResult(null);
     setUploadError("");
+    setRestoredTooLarge(false);
     setPipelines([]);
     setLeadFields([]);
     setPipelineId("");
@@ -128,24 +159,44 @@ export default function ColdbasePage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadError("");
-    setParsed(null);
+    setColumns([]);
+    setRowCount(0);
+    rowsRef.current = [];
     setFoundSet(new Set());
     setHasSearched(false);
     setResult(null);
+    setRestoredTooLarge(false);
     const formData = new FormData();
     formData.set("file", file);
     try {
       const res = await fetch("/api/upload", { method: "POST", body: formData });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Ошибка загрузки");
-      const nextParsed = { columns: data.columns, rows: data.rows };
-      const nextCols = getDefaultIdentifierColumns(data.columns ?? []);
-      setParsed(nextParsed);
+      const rows = (data.rows ?? []) as Record<string, unknown>[];
+      const cols = (data.columns ?? []) as string[];
+      const nextCols = getDefaultIdentifierColumns(cols);
+      rowsRef.current = rows;
+      setColumns(cols);
+      setRowCount(rows.length);
       setIdentifierColumns(nextCols);
-      try {
-        sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ parsed: nextParsed, identifierColumns: nextCols }));
-      } catch {
-        // quota или отключён storage — работаем без сохранения
+      if (rows.length <= ROW_STORAGE_LIMIT) {
+        try {
+          sessionStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({ columns: cols, identifierColumns: nextCols, rows })
+          );
+        } catch {
+          // quota
+        }
+      } else {
+        try {
+          sessionStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({ columns: cols, identifierColumns: nextCols, tooLarge: true })
+          );
+        } catch {
+          // quota
+        }
       }
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : String(err));
@@ -153,11 +204,12 @@ export default function ColdbasePage() {
   }, []);
 
   const onSearch = useCallback(async () => {
-    if (!parsed || identifierColumns.length === 0) return;
+    if (columns.length === 0 || identifierColumns.length === 0) return;
+    const rows = rowsRef.current;
     setSearching(true);
     try {
       const valuesSet = new Set<string>();
-      for (const r of parsed.rows) {
+      for (const r of rows) {
         for (const col of identifierColumns) {
           const v = String(r[col] ?? "").trim();
           if (v) valuesSet.add(v);
@@ -180,13 +232,12 @@ export default function ColdbasePage() {
       setExclusionPage(0);
       setToAddPage(0);
       const errs = data.errors ?? [];
-      // Считаем исключённые записи (строки), а не количество совпадений по телефонам
       const canonicalVal = (raw: string) => {
         const t = raw.trim();
         const n = normalizePhone(t);
         return n.length >= 10 ? n : t;
       };
-      const excludedRecordCount = parsed.rows.filter((r) =>
+      const excludedRecordCount = rows.filter((r) =>
         identifierColumns.some((col) => {
           const raw = String(r[col] ?? "").trim();
           return raw && foundSetNew.has(canonicalVal(raw));
@@ -204,7 +255,7 @@ export default function ColdbasePage() {
     } finally {
       setSearching(false);
     }
-  }, [parsed, identifierColumns]);
+  }, [columns.length, identifierColumns, showToast]);
 
   const loadPipelinesAndFields = useCallback(async () => {
     try {
@@ -236,17 +287,30 @@ export default function ColdbasePage() {
     const n = normalizePhone(t);
     return n.length >= 10 ? n : t;
   };
-  const rowIsExclusion = (r: Record<string, unknown>) =>
-    identifierColumns.some((col) => {
-      const raw = String(r[col] ?? "").trim();
-      return raw && foundSet.has(canonical(raw));
-    });
-  // Списки заполняем только после выполнения проверки в AmoCRM
-  const toAddRows = hasSearched ? (parsed?.rows.filter((r) => !rowIsExclusion(r)) ?? []) : [];
-  const exclusionRows = hasSearched ? (parsed?.rows.filter(rowIsExclusion) ?? []) : [];
+  // Производные списки — через useMemo, без пересчёта на каждом рендере
+  const toAddRows = useMemo(() => {
+    if (!hasSearched) return [];
+    const rows = rowsRef.current;
+    return rows.filter((r) =>
+      !identifierColumns.some((col) => {
+        const raw = String(r[col] ?? "").trim();
+        return raw && foundSet.has(canonical(raw));
+      })
+    );
+  }, [hasSearched, foundSet, identifierColumns]);
+  const exclusionRows = useMemo(() => {
+    if (!hasSearched) return [];
+    const rows = rowsRef.current;
+    return rows.filter((r) =>
+      identifierColumns.some((col) => {
+        const raw = String(r[col] ?? "").trim();
+        return raw && foundSet.has(canonical(raw));
+      })
+    );
+  }, [hasSearched, foundSet, identifierColumns]);
 
   const onSubmit = useCallback(async () => {
-    if (!parsed || toAddRows.length === 0 || !pipelineId) return;
+    if (columns.length === 0 || toAddRows.length === 0 || !pipelineId) return;
     setSubmitting(true);
     setResult(null);
     try {
@@ -255,7 +319,7 @@ export default function ColdbasePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           rows: toAddRows,
-          columns: parsed.columns,
+          columns,
           mapping,
           pipeline_id: Number(pipelineId),
           status_id: statusId || undefined,
@@ -270,7 +334,7 @@ export default function ColdbasePage() {
     } finally {
       setSubmitting(false);
     }
-  }, [parsed, toAddRows, pipelineId, statusId, mapping, identifierColumns, showToast]);
+  }, [columns, toAddRows, pipelineId, statusId, mapping, identifierColumns, showToast]);
 
   const currentPipeline = pipelineId ? pipelines.find((p) => p.id === pipelineId) : null;
   const currentStatuses = currentPipeline ? currentPipeline.statuses : [];
@@ -315,7 +379,7 @@ export default function ColdbasePage() {
             accept=".xlsx,.xls"
             onChange={onUpload}
           />
-          {parsed && (
+          {columns.length > 0 && (
             <button
               type="button"
               className="btn btn-ghost"
@@ -327,18 +391,21 @@ export default function ColdbasePage() {
           )}
         </div>
         {uploadError && <p className="error">{uploadError}</p>}
-        {parsed && (
-          <p>Загружено колонок: {parsed.columns.length}, строк: {parsed.rows.length}</p>
+        {restoredTooLarge && (
+          <p className="text-muted">Файл был слишком большой для восстановления, загрузите его снова.</p>
+        )}
+        {columns.length > 0 && (
+          <p>Загружено колонок: {columns.length}, строк: {rowCount}</p>
         )}
       </section>
 
-      {parsed && (
+      {columns.length > 0 && (
         <>
           <section className="card">
             <h2>2. Колонки для проверки в CRM</h2>
             <p>Показаны только колонки с телефонами и email — по ним проверяем дубли.</p>
             <div className="columns-grid">
-              {parsed.columns.filter(isColumnForCheck).map((c, i) => (
+              {columns.filter(isColumnForCheck).map((c, i) => (
                 <label key={`col-${i}-${c}`}>
                   <input
                     type="checkbox"
@@ -352,7 +419,7 @@ export default function ColdbasePage() {
                 </label>
               ))}
             </div>
-            {parsed.columns.filter(isColumnForCheck).length === 0 && (
+            {columns.filter(isColumnForCheck).length === 0 && (
               <p className="text-muted">Нет колонок с телефоном или email — добавьте в файл колонки с «телефон» или «email» в названии.</p>
             )}
             <button
@@ -392,7 +459,7 @@ export default function ColdbasePage() {
               const totalPages = Math.max(1, Math.ceil(exclusionRows.length / ROWS_PER_PAGE));
               const page = Math.min(exclusionPage, totalPages - 1);
               const slice = exclusionRows.slice(page * ROWS_PER_PAGE, page * ROWS_PER_PAGE + ROWS_PER_PAGE);
-              const tableCols = parsed.columns.filter((c) => !isNoteColumn(c));
+              const tableCols = columns.filter((c) => !isNoteColumn(c));
               return (
                 <>
                   <div className="table-wrap">
@@ -472,7 +539,7 @@ export default function ColdbasePage() {
               const totalPages = Math.max(1, Math.ceil(toAddRows.length / ROWS_PER_PAGE));
               const page = Math.min(toAddPage, totalPages - 1);
               const slice = toAddRows.slice(page * ROWS_PER_PAGE, page * ROWS_PER_PAGE + ROWS_PER_PAGE);
-              const tableCols = parsed.columns.filter((c) => !isNoteColumn(c));
+              const tableCols = columns.filter((c) => !isNoteColumn(c));
               return (
                 <>
                   <div className="table-wrap">
@@ -567,7 +634,7 @@ export default function ColdbasePage() {
                       }
                     >
                       <option value="">—</option>
-                      {parsed.columns.map((c) => (
+                      {columns.map((c) => (
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>
@@ -603,7 +670,7 @@ export default function ColdbasePage() {
                           }
                         >
                           <option value="">—</option>
-                          {parsed.columns.map((c) => (
+                          {columns.map((c) => (
                             <option key={c} value={c}>{c}</option>
                           ))}
                         </select>
@@ -629,12 +696,12 @@ export default function ColdbasePage() {
                   type="button"
                   className="btn btn-ghost"
                   onClick={async () => {
-                    if (!parsed || toAddRows.length === 0) return;
+                    if (columns.length === 0 || toAddRows.length === 0) return;
                     try {
                       const res = await fetch("/api/export-cleaned", {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ columns: parsed.columns, rows: toAddRows }),
+                        body: JSON.stringify({ columns, rows: toAddRows }),
                       });
                       if (!res.ok) throw new Error("Ошибка выгрузки");
                       const blob = await res.blob();
