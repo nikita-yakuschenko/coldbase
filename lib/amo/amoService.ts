@@ -4,8 +4,24 @@
 import { getClient, clearClient } from "./client";
 import { normalizePhone } from "../normalizePhone";
 
-/** Канонический вид для поиска: телефон → нормализованный, иначе — trim */
-function canonicalValue(value: string): string {
+/** Сообщение для UI: токен недействителен, нужна повторная авторизация */
+export const AMOCRM_AUTH_INVALID_MESSAGE = "Токен AmoCRM недействителен или истёк. Выполните повторную авторизацию: Настройки → «Авторизация AmoCRM». Проверьте в .env совпадение AMOCRM_REDIRECT_URI с настройками интеграции и правильность AMOCRM_CLIENT_SECRET.";
+
+/** Проверка ответа AmoCRM на ошибку OAuth (неверный/истёкший токен, неверный redirect_uri или client_secret). */
+function isOAuthInvalidError(e: unknown): boolean {
+  if (!e || typeof e !== "object" || !("response" in e)) return false;
+  const r = (e as { response?: unknown }).response;
+  if (typeof r !== "object" || r === null) return false;
+  const body = (r as { data?: unknown }).data ?? r;
+  if (typeof body !== "object" || body === null) return false;
+  const hint = "hint" in body ? String((body as { hint?: string }).hint) : "";
+  const detail = "detail" in body ? String((body as { detail?: string }).detail) : "";
+  return (
+    /cannot decrypt the authorization code/i.test(hint) ||
+    /authorization code/i.test(hint) ||
+    /oauth/i.test(detail)
+  );
+}
   const trimmed = value.trim();
   const norm = normalizePhone(trimmed);
   return norm.length >= 10 ? norm : trimmed;
@@ -52,6 +68,10 @@ export async function searchContactsByValues(values: string[]): Promise<{ found:
           break;
         }
       } catch (e) {
+        if (isOAuthInvalidError(e)) {
+          clearClient();
+          throw new Error(AMOCRM_AUTH_INVALID_MESSAGE);
+        }
         let msg = e instanceof Error ? e.message : String(e);
         if (e && typeof e === "object" && "response" in e) {
           const r = (e as { response?: unknown }).response;

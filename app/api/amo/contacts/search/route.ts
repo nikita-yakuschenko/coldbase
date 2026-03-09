@@ -2,7 +2,7 @@
  * POST: массив значений идентификатора (например телефоны) → множество найденных в AmoCRM.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { searchContactsByValues } from "@/lib/amo/amoService";
+import { searchContactsByValues, AMOCRM_AUTH_INVALID_MESSAGE } from "@/lib/amo/amoService";
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,6 +16,10 @@ export async function POST(req: NextRequest) {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[coldbase] contacts/search failed:", msg);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const isAuthInvalid = msg === AMOCRM_AUTH_INVALID_MESSAGE || msg.includes("Токен AmoCRM недействителен");
+    return NextResponse.json(
+      { error: msg },
+      { status: isAuthInvalid ? 401 : 500 }
+    );
   }
 }
