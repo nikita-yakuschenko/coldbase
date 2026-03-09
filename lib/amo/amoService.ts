@@ -22,6 +22,9 @@ function isOAuthInvalidError(e: unknown): boolean {
     /oauth/i.test(detail)
   );
 }
+
+/** Канонический вид для поиска: телефон → нормализованный, иначе — trim */
+function canonicalValue(value: string): string {
   const trimmed = value.trim();
   const norm = normalizePhone(trimmed);
   return norm.length >= 10 ? norm : trimmed;
