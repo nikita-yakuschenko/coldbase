@@ -75,6 +75,95 @@ body::after {
   gap: 1rem;
 }
 
+.header--with-tabs {
+  align-items: flex-start;
+  margin-bottom: 2.5rem;
+}
+
+.header-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.header-product-line {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+/* U+00D7 между coldbase и логотипом CRM */
+.header-product-sep {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.45rem;
+  color: var(--text-muted);
+  font-size: 2.65rem;
+  font-weight: 200;
+  line-height: 1;
+  user-select: none;
+}
+
+.header-logo-coldbase {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.header-logo-crm {
+  height: 28px;
+  width: auto;
+  max-width: 160px;
+  object-fit: contain;
+  flex-shrink: 0;
+  display: block;
+}
+
+/* Только Bitrix: в SVG лишний верхний отступ в viewBox — выравниваем по базовой линии «coldbase» */
+.header-logo-bitrix {
+  transform: translateY(4px);
+}
+
+.app-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.app-tab {
+  padding: 0.45rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--text-muted);
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.app-tab:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.app-tab--active {
+  color: var(--text);
+  border-color: rgba(139, 92, 246, 0.45);
+  background: rgba(139, 92, 246, 0.12);
+  box-shadow: var(--glow);
+}
+
+.tab-panel {
+  min-height: 40vh;
+}
+
 .header h1 {
   font-size: 2rem;
   font-weight: 700;
@@ -409,6 +498,19 @@ select option:hover {
 }
 
 /* Верхняя строка: Воронка, Статус, Название */
+.mapping-load-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  margin-top: 0.5rem;
+}
+
+.mapping-load-hint {
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
 .mapping-top-row {
   display: flex;
   flex-wrap: wrap;
