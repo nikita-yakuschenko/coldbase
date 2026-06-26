@@ -4,21 +4,21 @@
  */
 import { Amo } from "@shevernitskiy/amo";
 import { loadToken, saveToken, StoredToken } from "../tokenStore";
+import { getAmoApiDomain, getAmoOAuthBase, getAmoCredentials } from "./config";
+import { resetContactFieldCache } from "./fieldCache";
 
-const subdomain = process.env.AMOCRM_SUBDOMAIN ?? "";
-const clientId = process.env.AMOCRM_CLIENT_ID ?? "";
-const clientSecret = process.env.AMOCRM_CLIENT_SECRET ?? "";
-const redirectUri = process.env.AMOCRM_REDIRECT_URI ?? "";
+const { subdomain, clientId, clientSecret, redirectUri } = getAmoCredentials();
 
 let clientInstance: Amo | null = null;
 
 /** Сбросить кэш клиента (при 401 — следующий getClient загрузит токен из файла заново). */
 export function clearClient(): void {
   clientInstance = null;
+  resetContactFieldCache();
 }
 
 function buildClient(token: StoredToken | null): Amo {
-  const domain = `${subdomain || "your-subdomain"}.amocrm.ru`;
+  const domain = getAmoApiDomain();
   const auth = {
     client_id: clientId,
     client_secret: clientSecret,
@@ -62,9 +62,6 @@ export async function getClient(): Promise<Amo> {
   return clientInstance;
 }
 
-/** URL для OAuth: центральный хост (не subdomain). У subdomain.amocrm.ru/oauth был 404. */
-const AMOCRM_OAUTH_BASE = "https://www.amocrm.ru";
-
 export function getAuthUrl(): string {
   const redirect = redirectUri || "http://localhost:3000/api/amo/callback";
   const params = new URLSearchParams({
@@ -73,5 +70,5 @@ export function getAuthUrl(): string {
     response_type: "code",
     state: "coldbase",
   });
-  return `${AMOCRM_OAUTH_BASE}/oauth?${params.toString()}`;
+  return `${getAmoOAuthBase()}/oauth?${params.toString()}`;
 }

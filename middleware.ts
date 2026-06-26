@@ -15,8 +15,14 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  // Страница входа, API логина, статуса и check — без проверки
-  if (path === "/login" || path === "/api/auth/login" || path === "/api/auth/status" || path === "/api/auth/check") {
+  // Страница входа, API логина, статуса, check и OAuth callback AmoCRM — без проверки
+  if (
+    path === "/login" ||
+    path === "/api/auth/login" ||
+    path === "/api/auth/status" ||
+    path === "/api/auth/check" ||
+    path === "/api/amo/callback"
+  ) {
     return NextResponse.next();
   }
 

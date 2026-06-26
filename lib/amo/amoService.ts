@@ -3,6 +3,12 @@
  */
 import { getClient, clearClient } from "./client";
 import { normalizePhone } from "../normalizePhone";
+import {
+  getCachedPhoneFieldId,
+  setCachedPhoneFieldId,
+  getCachedEmailFieldId,
+  setCachedEmailFieldId,
+} from "./fieldCache";
 
 /** Сообщение для UI: токен недействителен, нужна повторная авторизация */
 export const AMOCRM_AUTH_INVALID_MESSAGE = "Токен AmoCRM недействителен или истёк. Выполните повторную авторизацию: Настройки → «Авторизация AmoCRM». Проверьте в .env совпадение AMOCRM_REDIRECT_URI с настройками интеграции и правильность AMOCRM_CLIENT_SECRET.";
@@ -23,11 +29,44 @@ function isOAuthInvalidError(e: unknown): boolean {
   );
 }
 
+function handleAmoAuthError(e: unknown): never {
+  if (isOAuthInvalidError(e)) {
+    clearClient();
+    throw new Error(AMOCRM_AUTH_INVALID_MESSAGE);
+  }
+  const msg = e && typeof e === "object" && "response" in e
+    ? JSON.stringify((e as { response: unknown }).response)
+    : e instanceof Error ? e.message : String(e);
+  if (msg.includes("401") || msg.includes("Unauthorized")) {
+    clearClient();
+  }
+  throw e instanceof Error ? e : new Error(msg);
+}
+
 /** Канонический вид для поиска: телефон → нормализованный, иначе — trim */
 function canonicalValue(value: string): string {
   const trimmed = value.trim();
   const norm = normalizePhone(trimmed);
   return norm.length >= 10 ? norm : trimmed;
+}
+
+function isEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+/** Нормализация идентификатора для создания контакта (телефон в формате +7…, email в lower case). */
+function normalizeIdentifier(value: string): { type: "phone" | "email"; value: string } | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (isEmail(trimmed)) {
+    return { type: "email", value: trimmed.toLowerCase() };
+  }
+  const norm = normalizePhone(trimmed);
+  if (norm.length >= 10) {
+    const formatted = /^7\d{10}$/.test(norm) ? `+${norm}` : norm;
+    return { type: "phone", value: formatted };
+  }
+  return { type: "phone", value: trimmed };
 }
 
 const SEARCH_DELAY_MS = 250;
@@ -139,21 +178,24 @@ export async function getLeadFields(): Promise<
   return [...builtin, ...custom];
 }
 
-/** ID поля «Телефон» у контактов (для addComplex). Берём первое поле типа multitext с кодом PHONE или первое подходящее. */
-let cachedContactPhoneFieldId: number | null = null;
-
-export async function getContactPhoneFieldId(): Promise<number | null> {
-  if (cachedContactPhoneFieldId != null) return cachedContactPhoneFieldId;
+async function getContactFieldIds(): Promise<{ phone: number | null; email: number | null }> {
+  const cachedPhone = getCachedPhoneFieldId();
+  const cachedEmail = getCachedEmailFieldId();
+  if (cachedPhone != null || cachedEmail != null) {
+    return { phone: cachedPhone, email: cachedEmail };
+  }
   try {
     const amo = await getClient();
     const res = await amo.custom_fields.getCustomFields("contacts");
-    const fields = (res as { _embedded?: { custom_fields: { id: number; type: string; code?: string }[] } })._embedded?.custom_fields ?? [];
-    const phone = fields.find((f) => f.code === "PHONE" || f.type === "multitext");
-    if (phone) cachedContactPhoneFieldId = phone.id;
+    const fields = (res as { _embedded?: { custom_fields: { id: number; code?: string }[] } })._embedded?.custom_fields ?? [];
+    const phone = fields.find((f) => f.code === "PHONE");
+    const email = fields.find((f) => f.code === "EMAIL");
+    if (phone) setCachedPhoneFieldId(phone.id);
+    if (email) setCachedEmailFieldId(email.id);
+    return { phone: phone?.id ?? null, email: email?.id ?? null };
   } catch {
-    // игнорируем
+    return { phone: null, email: null };
   }
-  return cachedContactPhoneFieldId;
 }
 
 const NOTE_COLUMN_PATTERN = /^Примечание к сделке( \(\d+\))?$/;
@@ -177,105 +219,175 @@ export function getNoteColumns(columns: string[]): string[] {
 }
 
 const NOTES_BATCH = 250;
+const BATCH_WITH_CONTACT = 50;
+const BATCH_WITHOUT_CONTACT = 250;
 
-/** Создание лидов: с контактом — addComplex (до 50 за запрос), без — addLeads (до 250). */
-export async function createLeads(rows: CreateLeadRow[]): Promise<{ ok: number; errors: { rowIndex: number; message: string }[] }> {
-  const amo = await getClient();
-  const errors: { rowIndex: number; message: string }[] = [];
-  let ok = 0;
-  const hasContacts = rows.some((r) => r.identifierValue);
-  const BATCH = hasContacts ? 50 : 250;
-  const phoneFieldId = hasContacts ? await getContactPhoneFieldId() : null;
+interface IndexedLeadRow {
+  item: CreateLeadRow;
+  rowIndex: number;
+}
 
-  for (let i = 0; i < rows.length; i += BATCH) {
-    const chunk = rows.slice(i, i + BATCH);
-    const leads: Record<string, unknown>[] = chunk.map((item) => {
-      const lead: Record<string, unknown> = {
-        pipeline_id: item.pipeline_id,
-        status_id: item.status_id ?? undefined,
-        name: "",
-      };
-      if (item.identifierValue && phoneFieldId != null) {
+function buildLeadPayload(
+  item: CreateLeadRow,
+  contactFields: { phone: number | null; email: number | null }
+): Record<string, unknown> {
+  const lead: Record<string, unknown> = {
+    pipeline_id: item.pipeline_id,
+    status_id: item.status_id ?? undefined,
+    name: "",
+  };
+
+  if (item.identifierValue) {
+    const id = normalizeIdentifier(item.identifierValue);
+    if (id) {
+      const fieldId = id.type === "email" ? contactFields.email : contactFields.phone;
+      if (fieldId != null) {
         (lead._embedded as Record<string, unknown>) = {
           contacts: [
             {
               custom_fields_values: [
-                { field_id: phoneFieldId, values: [{ value: item.identifierValue }] },
+                { field_id: fieldId, values: [{ value: id.value }] },
               ],
             },
           ],
         };
       }
-      const custom_fields_values: { field_id: number; values: { value: string }[] }[] = [];
-      for (const [fieldKey, columnKey] of Object.entries(item.mapping)) {
-        const raw = item.row[columnKey];
-        const value = raw != null ? String(raw).trim() : "";
-        if (fieldKey === "name") {
-          lead.name = value || "Лид";
-        } else if (fieldKey === "price") {
-          const num = Number(value);
-          lead.price = isNaN(num) ? 0 : num;
-        } else {
-          const fieldId = Number(fieldKey);
-          if (!isNaN(fieldId)) custom_fields_values.push({ field_id: fieldId, values: [{ value }] });
-        }
-      }
-      if (custom_fields_values.length) lead.custom_fields_values = custom_fields_values;
-      return lead;
-    });
+    }
+  }
+
+  const custom_fields_values: { field_id: number; values: { value: string }[] }[] = [];
+  for (const [fieldKey, columnKey] of Object.entries(item.mapping)) {
+    const raw = item.row[columnKey];
+    const value = raw != null ? String(raw).trim() : "";
+    if (fieldKey === "name") {
+      lead.name = value || "Лид";
+    } else if (fieldKey === "price") {
+      const num = Number(value);
+      lead.price = isNaN(num) ? 0 : num;
+    } else {
+      const fieldId = Number(fieldKey);
+      if (!isNaN(fieldId)) custom_fields_values.push({ field_id: fieldId, values: [{ value }] });
+    }
+  }
+  if (custom_fields_values.length) lead.custom_fields_values = custom_fields_values;
+  return lead;
+}
+
+function extractApiError(e: unknown): string {
+  if (e && typeof e === "object" && "response" in e && e.response != null) {
+    const r = (e as { response: unknown }).response;
+    return typeof r === "object" && r !== null && "detail" in r
+      ? String((r as { detail: unknown }).detail)
+      : JSON.stringify(r);
+  }
+  return e instanceof Error ? e.message : String(e);
+}
+
+async function processLeadBatch(
+  batch: IndexedLeadRow[],
+  withContact: boolean,
+  contactFields: { phone: number | null; email: number | null },
+  warnings: string[]
+): Promise<{ ok: number; errors: { rowIndex: number; message: string }[] }> {
+  const amo = await getClient();
+  const errors: { rowIndex: number; message: string }[] = [];
+  let ok = 0;
+  const chunkSize = withContact ? BATCH_WITH_CONTACT : BATCH_WITHOUT_CONTACT;
+
+  for (let i = 0; i < batch.length; i += chunkSize) {
+    const chunk = batch.slice(i, i + chunkSize);
+    const leads = chunk.map(({ item }) => buildLeadPayload(item, contactFields));
 
     try {
       let leadIds: number[] = [];
-      if (hasContacts) {
+      if (withContact) {
         const response = await amo.lead.addComplex(leads as Parameters<typeof amo.lead.addComplex>[0]);
         leadIds = Array.isArray(response) ? response.map((r: { id: number }) => r.id) : [];
-        const created = leadIds.length;
-        ok += created;
-        if (created < chunk.length) {
-          for (let k = created; k < chunk.length; k++) errors.push({ rowIndex: i + k, message: "Не создан" });
-        }
       } else {
         const response = await amo.lead.addLeads(leads as Parameters<typeof amo.lead.addLeads>[0]);
         const embedded = response._embedded?.leads ?? [];
         leadIds = embedded.map((l: { id: number }) => l.id);
-        const created = leadIds.length;
-        ok += created;
-        if (created < chunk.length) {
-          for (let k = created; k < chunk.length; k++) errors.push({ rowIndex: i + k, message: "Не создан" });
+      }
+
+      const created = leadIds.length;
+      ok += created;
+      if (created < chunk.length) {
+        for (let k = created; k < chunk.length; k++) {
+          errors.push({ rowIndex: chunk[k].rowIndex, message: "Не создан (нет ответа от API)" });
         }
       }
-      // Примечания к сделкам: по одному на каждую непустую запись в noteTexts по порядку
+
       const notesPayload: { entity_id: number; note_type: "common"; params: { text: string } }[] = [];
       for (let k = 0; k < leadIds.length; k++) {
-        const texts = chunk[k].noteTexts ?? [];
+        const texts = chunk[k].item.noteTexts ?? [];
         for (const text of texts) {
           const t = String(text).trim();
           if (t) notesPayload.push({ entity_id: leadIds[k], note_type: "common", params: { text: t } });
         }
       }
       for (let n = 0; n < notesPayload.length; n += NOTES_BATCH) {
-        const batch = notesPayload.slice(n, n + NOTES_BATCH);
-        if (batch.length > 0) {
-          try {
-            await amo.note.addNotes("leads", batch);
-          } catch {
-            // лиды уже созданы, примечания частично не добавлены — не ломаем общий результат
-          }
+        const noteBatch = notesPayload.slice(n, n + NOTES_BATCH);
+        if (noteBatch.length === 0) continue;
+        try {
+          await amo.note.addNotes("leads", noteBatch);
+        } catch (noteErr) {
+          warnings.push(`Примечания: не удалось добавить ${noteBatch.length} записей (${extractApiError(noteErr)})`);
         }
       }
     } catch (e) {
-      let msg: string;
-      if (e && typeof e === "object" && "response" in e && e.response != null) {
-        const r = (e as { response: unknown }).response;
-        msg = typeof r === "object" && r !== null && "detail" in r
-          ? String((r as { detail: unknown }).detail)
-          : JSON.stringify(r);
-      } else {
-        msg = e instanceof Error ? e.message : String(e);
+      if (isOAuthInvalidError(e)) {
+        clearClient();
+        throw new Error(AMOCRM_AUTH_INVALID_MESSAGE);
       }
-      chunk.forEach((_, k) => errors.push({ rowIndex: i + k, message: msg }));
+      const msg = extractApiError(e);
+      if (msg.includes("401") || msg.includes("Unauthorized")) {
+        clearClient();
+      }
+      chunk.forEach(({ rowIndex }) => errors.push({ rowIndex, message: msg }));
     }
   }
 
   return { ok, errors };
+}
+
+/** Создание лидов: с контактом — addComplex (до 50 за запрос), без — addLeads (до 250). */
+export async function createLeads(rows: CreateLeadRow[]): Promise<{
+  ok: number;
+  errors: { rowIndex: number; message: string }[];
+  warnings: string[];
+}> {
+  const warnings: string[] = [];
+  const errors: { rowIndex: number; message: string }[] = [];
+  let ok = 0;
+
+  const withContact: IndexedLeadRow[] = [];
+  const withoutContact: IndexedLeadRow[] = [];
+  rows.forEach((item, rowIndex) => {
+    if (item.identifierValue) withContact.push({ item, rowIndex });
+    else withoutContact.push({ item, rowIndex });
+  });
+
+  const contactFields = withContact.length > 0 ? await getContactFieldIds() : { phone: null, email: null };
+  if (withContact.length > 0 && contactFields.phone == null && contactFields.email == null) {
+    warnings.push("Не найдены поля PHONE/EMAIL у контактов — лиды будут созданы без привязки контакта");
+    withoutContact.push(...withContact);
+    withContact.length = 0;
+  }
+
+  try {
+    if (withContact.length > 0) {
+      const result = await processLeadBatch(withContact, true, contactFields, warnings);
+      ok += result.ok;
+      errors.push(...result.errors);
+    }
+    if (withoutContact.length > 0) {
+      const result = await processLeadBatch(withoutContact, false, contactFields, warnings);
+      ok += result.ok;
+      errors.push(...result.errors);
+    }
+  } catch (e) {
+    handleAmoAuthError(e);
+  }
+
+  return { ok, errors, warnings };
 }

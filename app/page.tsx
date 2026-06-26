@@ -47,7 +47,7 @@ export default function ColdbasePage() {
   const [statusId, setStatusId] = useState<number | "">("");
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: number; errors: { rowIndex: number; message: string }[] } | null>(null);
+  const [result, setResult] = useState<{ ok: number; errors: { rowIndex: number; message: string }[]; warnings?: string[] } | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<{ message: string; variant: ToastVariant } | null>(null);
@@ -129,6 +129,22 @@ export default function ColdbasePage() {
     document.addEventListener("click", close);
     return () => document.removeEventListener("click", close);
   }, [settingsOpen]);
+
+  // Результат OAuth callback (?amo=ok или ?error=...)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const amo = params.get("amo");
+    const error = params.get("error");
+    if (amo === "ok") {
+      showToast("Авторизация AmoCRM успешна", "success");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (error) {
+      const msg = error === "no_code" ? "OAuth: код авторизации не получен" : decodeURIComponent(error);
+      showToast(msg, "error");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [showToast]);
 
   const onReset = useCallback(() => {
     try {
@@ -726,6 +742,11 @@ export default function ColdbasePage() {
                   <p className="success">
                     Создано лидов: {result.ok}. Ошибок: {result.errors.length}
                   </p>
+                  {result.warnings && result.warnings.length > 0 && (
+                    <p className="text-muted" style={{ marginTop: "0.5rem" }}>
+                      {result.warnings[0]}
+                    </p>
+                  )}
                   {result.errors.length > 0 && (
                     <p className="error" style={{ marginTop: "0.5rem" }}>
                       {result.errors[0].message}

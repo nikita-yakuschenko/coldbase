@@ -4,11 +4,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Amo } from "@shevernitskiy/amo";
 import { saveToken } from "@/lib/tokenStore";
+import { getAmoApiDomain, getAmoCredentials } from "@/lib/amo/config";
 
-const subdomain = process.env.AMOCRM_SUBDOMAIN ?? "";
-const clientId = process.env.AMOCRM_CLIENT_ID ?? "";
-const clientSecret = process.env.AMOCRM_CLIENT_SECRET ?? "";
-const redirectUri = process.env.AMOCRM_REDIRECT_URI ?? "";
+const { clientId, clientSecret, redirectUri } = getAmoCredentials();
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
@@ -17,7 +15,7 @@ export async function GET(req: NextRequest) {
   }
   try {
     const amo = new Amo(
-      `${subdomain}.amocrm.ru`,
+      getAmoApiDomain(),
       {
         client_id: clientId,
         client_secret: clientSecret,
