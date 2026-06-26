@@ -1,16 +1,38 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Image from "next/image";
 import { LogOut } from "lucide-react";
 import ColdbaseAmoTab from "@/app/components/ColdbaseAmoTab";
 import ColdbaseBitrixTab from "@/app/components/ColdbaseBitrixTab";
 import { AmoSettingsDropdown } from "@/app/components/AmoSettingsDropdown";
+import { Toast, type ToastVariant } from "@/app/components/Toast";
 
 type CrmTab = "amo" | "bitrix";
 
 export default function ColdbasePage() {
   const [tab, setTab] = useState<CrmTab>("amo");
+  const [toast, setToast] = useState<{ message: string; variant: ToastVariant } | null>(null);
+
+  const showToast = useCallback((message: string, variant: ToastVariant = "error") => {
+    setToast({ message, variant });
+  }, []);
+
+  // Результат OAuth callback (?amo=ok или ?error=...)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const amo = params.get("amo");
+    const error = params.get("error");
+    if (amo === "ok") {
+      showToast("Авторизация AmoCRM успешна", "success");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (error) {
+      const msg = error === "no_code" ? "OAuth: код авторизации не получен" : decodeURIComponent(error);
+      showToast(msg, "error");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, [showToast]);
 
   return (
     <div className="app">
@@ -73,6 +95,15 @@ export default function ColdbasePage() {
       </div>
 
       <footer className="auth-footer">© module.team, 2026</footer>
+
+      {toast && (
+        <Toast
+          message={toast.message}
+          variant={toast.variant}
+          onClose={() => setToast(null)}
+          autoCloseMs={6000}
+        />
+      )}
     </div>
   );
 }

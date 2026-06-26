@@ -2,7 +2,7 @@
  * POST: создание лидов — строки «к добавлению» + маппинг + pipeline_id, status_id, колонка-идентификатор.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { createLeads, CreateLeadRow, getNoteColumns } from "@/lib/amo/amoService";
+import { createLeads, CreateLeadRow, getNoteColumns, AMOCRM_AUTH_INVALID_MESSAGE } from "@/lib/amo/amoService";
 
 export async function POST(req: NextRequest) {
   try {
@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const isAuthInvalid = msg === AMOCRM_AUTH_INVALID_MESSAGE || msg.includes("Токен AmoCRM недействителен");
+    return NextResponse.json({ error: msg }, { status: isAuthInvalid ? 401 : 500 });
   }
 }

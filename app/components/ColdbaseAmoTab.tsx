@@ -48,7 +48,7 @@ export default function ColdbaseAmoTab() {
   const [statusId, setStatusId] = useState<number | "">("");
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<{ ok: number; errors: { rowIndex: number; message: string }[] } | null>(null);
+  const [result, setResult] = useState<{ ok: number; errors: { rowIndex: number; message: string }[]; warnings?: string[] } | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [toast, setToast] = useState<{ message: string; variant: ToastVariant } | null>(null);
   const [showExclusionsTable, setShowExclusionsTable] = useState(false);
@@ -688,6 +688,11 @@ export default function ColdbaseAmoTab() {
                   <p className="success">
                     Создано лидов: {result.ok}. Ошибок: {result.errors.length}
                   </p>
+                  {result.warnings && result.warnings.length > 0 && (
+                    <p className="text-muted" style={{ marginTop: "0.5rem" }}>
+                      {result.warnings[0]}
+                    </p>
+                  )}
                   {result.errors.length > 0 && (
                     <p className="error" style={{ marginTop: "0.5rem" }}>
                       {result.errors[0].message}
