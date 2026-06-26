@@ -5,13 +5,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { Amo } from "@shevernitskiy/amo";
 import { saveToken } from "@/lib/tokenStore";
 import { getAmoApiDomain, getAmoCredentials } from "@/lib/amo/config";
+import { appUrl } from "@/lib/amo/appUrl";
 
 const { clientId, clientSecret, redirectUri } = getAmoCredentials();
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code");
   if (!code) {
-    return NextResponse.redirect(new URL("/?error=no_code", req.url));
+    return NextResponse.redirect(appUrl("/?error=no_code"));
   }
   try {
     const amo = new Amo(
@@ -36,9 +37,9 @@ export async function GET(req: NextRequest) {
     );
     // один запрос чтобы триггернуть обмен кода на токен и on_token
     await amo.account.getAccount();
-    return NextResponse.redirect(new URL("/?amo=ok", req.url));
+    return NextResponse.redirect(appUrl("/?amo=ok"));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(msg)}`, req.url));
+    return NextResponse.redirect(appUrl(`/?error=${encodeURIComponent(msg)}`));
   }
 }
